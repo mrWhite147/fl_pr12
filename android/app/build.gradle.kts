@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.example.notification"
-    compileSdk = 34 
+    compileSdk = 35 
     
     ndkVersion = "27.0.12077973"
 
