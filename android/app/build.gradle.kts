@@ -6,13 +6,12 @@ plugins {
 
 android {
     namespace = "com.example.notification"
-    compileSdk = 35 
+    compileSdk = 36
     
-    ndkVersion = "27.0.12077973"
+    ndkVersion = flutter.ndkVersion
 
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
-        
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
@@ -24,7 +23,7 @@ android {
     defaultConfig {
         applicationId = "com.example.notification"
         
-        minSdk = 21 
+        minSdk = flutter.minSdkVersion
         targetSdk = 34
         
         versionCode = flutter.versionCode

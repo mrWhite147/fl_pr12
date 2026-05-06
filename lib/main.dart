@@ -11,7 +11,7 @@ void main() async {
   runApp(MaterialApp(
     home: MainScreen(service: service),
     debugShowCheckedModeBanner: false,
-    theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.deepPurple),
+    theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.blue),
   ));
 }
 
@@ -66,7 +66,10 @@ class _MainScreenState extends State<MainScreen> {
       appBar: AppBar(
         title: const Text("Напоминания"),
         actions: [
-          IconButton(icon: const Icon(Icons.bolt, color: Colors.orange), onPressed: () => widget.service.showInstant()),
+          IconButton(
+            icon: const Icon(Icons.bug_report, color: Colors.blue), 
+            onPressed: () => widget.service.showInstant()
+          ),
         ],
       ),
       body: ListView.builder(
