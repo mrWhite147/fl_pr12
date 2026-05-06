@@ -4,63 +4,56 @@ import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:permission_handler/permission_handler.dart';
 
-class NotificationService {
-  static final NotificationService _instance = NotificationService._internal();
-  factory NotificationService() => _instance;
-  NotificationService._internal();
+class NotifyService {
+  final _plugin = FlutterLocalNotificationsPlugin();
 
-  final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
-
+  // 1. Инициализация сервиса
   Future<void> init() async {
+    // Настройка часовых поясов (Москва GMT+3)
     tz.initializeTimeZones();
-    
-    try {
-      tz.setLocalLocation(tz.getLocation('Europe/Moscow'));
-      print("NotificationService: Москва (GMT+3) установлена");
-    } catch (e) {
-      print("Ошибка часового пояса: $e");
-    }
+    tz.setLocalLocation(tz.getLocation('Europe/Moscow'));
 
+    // Иконка для уведомлений (должна быть в android/app/src/main/res/mipmap)
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosInit = DarwinInitializationSettings();
+    
+    const initSettings = InitializationSettings(
+      android: androidInit,
+      iOS: DarwinInitializationSettings(),
+    );
 
     await _plugin.initialize(
-      const InitializationSettings(android: androidInit, iOS: iosInit),
+      initSettings,
       onDidReceiveNotificationResponse: (details) {
-        print("Пользователь открыл уведомление: ${details.id}");
+        print("Пользователь нажал на уведомление");
       },
     );
   }
 
-  Future<bool> requestPermissions() async {
+  // 2. Запрос разрешений (Критично для Android 12/13/14)
+  Future<void> requestPermissions() async {
     if (Platform.isAndroid) {
-      final status = await Permission.notification.request();
-      
+      // Запрос на показ уведомлений (текст/звук)
+      await Permission.notification.request();
+
+      // Запрос на "Точные будильники" (Android 12+)
+      // Если это разрешение не дано, метод schedule вызовет ошибку
       if (await Permission.scheduleExactAlarm.isDenied) {
-        print("Запрос доступа к точным будильникам...");
         await Permission.scheduleExactAlarm.request();
       }
-
-      return status.isGranted;
-    } else if (Platform.isIOS) {
-      final result = await _plugin
-          .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
-          ?.requestPermissions(alert: true, badge: true, sound: true);
-      return result ?? false;
     }
-    return false;
   }
 
-  NotificationDetails _notificationDetails() {
+  // Вспомогательный метод для настроек канала (Максимальный приоритет)
+  NotificationDetails _details() {
     return const NotificationDetails(
       android: AndroidNotificationDetails(
-        'reminder_channel_v1',
-        'Напоминания',
+        'reminder_channel_v3', // ID канала
+        'Напоминания',          // Имя канала
         channelDescription: 'Уведомления о ваших задачах',
-        importance: Importance.max,
-        priority: Priority.high,
-        fullScreenIntent: true,
-        category: AndroidNotificationCategory.reminder,
+        importance: Importance.max, // Чтобы всплывало баннером
+        priority: Priority.high,    // Высокий приоритет
+        fullScreenIntent: true,     // Для пробития защиты Xiaomi
+        playSound: true,
       ),
       iOS: DarwinNotificationDetails(
         presentAlert: true,
@@ -70,30 +63,29 @@ class NotificationService {
     );
   }
 
-  Future<void> showInstantNotification() async {
+  // 3. Мгновенное уведомление (Кнопка-молния)
+  Future<void> showInstant() async {
     await _plugin.show(
-      999,
-      'Уведомление',
-      'Уведомление',
-      _notificationDetails(),
+      0, 
+      'Тест системы! ⚡', 
+      'Мгновенное уведомление работает по МСК.', 
+      _details(),
     );
   }
 
-  Future<void> scheduleNotification({
-    required int id,
-    required String title,
-    required String body,
-    required DateTime scheduledDate,
-  }) async {
-    final now = tz.TZDateTime.now(tz.local);
-    final scheduledAt = tz.TZDateTime.from(scheduledDate, tz.local);
+  // 4. Планирование уведомления (Метод из твоего рабочего примера)
+  Future<void> schedule(int id, String title, String body, DateTime date) async {
+    // Конвертируем обычный DateTime в TZDateTime (Москва)
+    final tzDate = tz.TZDateTime.from(date, tz.local);
 
+    // Лог для проверки в консоли
     print("--- ПЛАНИРОВАНИЕ ---");
-    print("Сейчас (МСК): $now");
-    print("Цель (МСК): $scheduledAt");
+    print("Сейчас (МСК): ${tz.TZDateTime.now(tz.local)}");
+    print("Цель (МСК): $tzDate");
 
-    if (scheduledAt.isBefore(now)) {
-      print("Ошибка: время напоминания в прошлом");
+    // Если время уже прошло, не планируем
+    if (tzDate.isBefore(tz.TZDateTime.now(tz.local))) {
+      print("Ошибка: Время уже прошло.");
       return;
     }
 
@@ -101,17 +93,19 @@ class NotificationService {
       id,
       title,
       body,
-      scheduledAt,
-      _notificationDetails(),
+      tzDate,
+      _details(),
+      // exactAllowWhileIdle позволяет сработать даже в режиме экономии энергии
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
     );
-    print("Напоминание $id успешно создано!");
+    print("Уведомление $id успешно запланировано!");
   }
 
-  Future<void> cancelNotification(int id) async {
+  // 5. Отмена уведомления (при удалении карточки)
+  Future<void> cancel(int id) async {
     await _plugin.cancel(id);
-    print("Уведомление $id удалено из системного планировщика");
+    print("Системное уведомление $id отменено");
   }
 }

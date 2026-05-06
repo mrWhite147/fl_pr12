@@ -1,245 +1,167 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'models/reminder.dart';
 import 'services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  await NotificationService().init();
-  
-  runApp(const MaterialApp(
-    home: HomeScreen(),
+  final service = NotifyService();
+  await service.init();
+  runApp(MaterialApp(
     debugShowCheckedModeBanner: false,
+    theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.deepPurple),
+    home: MainScreen(service: service),
   ));
 }
 
-class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+class MainScreen extends StatefulWidget {
+  final NotifyService service;
+  const MainScreen({super.key, required this.service});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State<MainScreen> createState() => _MainScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  final List<Reminder> _reminders = [];
-  final _notificationService = NotificationService();
-  bool _isPermissionGranted = true;
+class _MainScreenState extends State<MainScreen> {
+  List<Reminder> _list = [];
 
   @override
   void initState() {
     super.initState();
-    _handlePermissions();
+    _loadData();
+    widget.service.requestPermissions();
   }
 
-  Future<void> _handlePermissions() async {
-    bool granted = await _notificationService.requestPermissions();
-    
-    var status = await Permission.notification.status;
-    
-    setState(() {
-      _isPermissionGranted = status.isGranted;
-    });
+  // СОХРАНЕНИЕ В ПАМЯТЬ
+  void _saveData() async {
+    final prefs = await SharedPreferences.getInstance();
+    prefs.setString('reminders_db', jsonEncode(_list.map((e) => e.toJson()).toList()));
   }
 
-  void _addReminder(String title, String desc, DateTime dt) {
-    final int id = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    
-    final newReminder = Reminder(
-      id: id,
-      title: title,
-      description: desc,
-      dateTime: dt,
-    );
-
-    setState(() {
-      _reminders.add(newReminder);
-      _reminders.sort((a, b) => a.dateTime.compareTo(b.dateTime));
-    });
-
-    _notificationService.scheduleNotification(
-      id: id,
-      title: title,
-      body: desc,
-      scheduledDate: dt,
-    );
-  }
-  void _deleteReminder(int id) {
-    setState(() {
-      _reminders.removeWhere((r) => r.id == id);
-    });
-    _notificationService.cancelNotification(id);
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Напоминание удалено')),
-    );
+  // ЗАГРУЗКА ИЗ ПАМЯТИ
+  void _loadData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? raw = prefs.getString('reminders_db');
+    if (raw != null) {
+      setState(() => _list = (jsonDecode(raw) as List).map((e) => Reminder.fromJson(e)).toList());
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Напоминалка'),
-        backgroundColor: Colors.blueAccent,
+        title: const Text("Мои Напоминания"),
+        centerTitle: true,
         actions: [
           IconButton(
-            icon: const Icon(Icons.bug_report),
-            onPressed: () => _notificationService.showInstantNotification(),
+            icon: const Icon(Icons.bolt, color: Colors.orange), 
+            onPressed: () => widget.service.showInstant()
           ),
         ],
       ),
-      body: Column(
-        children: [
-          if (!_isPermissionGranted)
-            Container(
-              width: double.infinity,
-              color: Colors.amber[100],
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  const Icon(Icons.warning_amber_rounded, color: Colors.orange),
-                  const SizedBox(width: 10),
-                  const Expanded(
-                    child: Text(
-                      'Уведомления отключены! Вы не получите напоминания вовремя.',
-                      style: TextStyle(fontSize: 13),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => openAppSettings(),
-                    child: const Text('ВКЛЮЧИТЬ'),
-                  ),
-                ],
-              ),
-            ),
-          
-          Expanded(
-            child: _reminders.isEmpty
-                ? const Center(child: Text('Напоминаний пока нет'))
-                : ListView.builder(
-                    itemCount: _reminders.length,
-                    padding: const EdgeInsets.all(10),
-                    itemBuilder: (context, index) {
-                      final item = _reminders[index];
-                      final bool isPast = item.isPast;
+      body: _list.isEmpty 
+        ? const Center(child: Text("Список пуст"))
+        : ListView.builder(
+            padding: const EdgeInsets.all(10),
+            itemCount: _list.length,
+            itemBuilder: (context, index) {
+              final item = _list[index];
+              final isPast = item.isPast;
 
-                      return Card(
-                        color: isPast ? Colors.grey[200] : Colors.white,
-                        elevation: isPast ? 0 : 3,
-                        margin: const EdgeInsets.only(bottom: 10),
-                        child: ListTile(
-                          leading: Icon(
-                            isPast ? Icons.history : Icons.alarm,
-                            color: isPast ? Colors.grey : Colors.blue,
-                          ),
-                          title: Text(
-                            item.title,
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              decoration: isPast ? TextDecoration.lineThrough : null,
-                              color: isPast ? Colors.grey : Colors.black,
-                            ),
-                          ),
-                          subtitle: Text(
-                            '${item.description}\n${DateFormat('dd.MM.yyyy HH:mm').format(item.dateTime)}',
-                            style: TextStyle(color: isPast ? Colors.grey : Colors.black87),
-                          ),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete_outline, color: Colors.red),
-                            onPressed: () => _deleteReminder(item.id),
-                          ),
-                        ),
-                      );
+              return Card(
+                // ОФОРМЛЕНИЕ: Выделение прошедших серым цветом
+                color: isPast ? Colors.grey[200] : Colors.white,
+                elevation: isPast ? 0 : 3,
+                child: ListTile(
+                  leading: Icon(isPast ? Icons.check_circle_outline : Icons.alarm, color: isPast ? Colors.grey : Colors.deepPurple),
+                  title: Text(
+                    item.title, 
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold, 
+                      decoration: isPast ? TextDecoration.lineThrough : null, // Зачеркивание
+                      color: isPast ? Colors.grey : Colors.black
+                    )
+                  ),
+                  subtitle: Text("${item.desc}\n${DateFormat('dd.MM HH:mm').format(item.time)}"),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_sweep, color: Colors.redAccent),
+                    onPressed: () {
+                      widget.service.cancel(item.id);
+                      setState(() => _list.removeAt(index));
+                      _saveData();
                     },
                   ),
+                ),
+              );
+            },
           ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showAddDialog(context),
-        child: const Icon(Icons.add),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showAddDialog(),
+        label: const Text("Добавить"),
+        icon: const Icon(Icons.add),
       ),
     );
   }
 
-  void _showAddDialog(BuildContext context) {
-    final titleController = TextEditingController();
-    final descController = TextEditingController();
-    DateTime selectedDate = DateTime.now();
-    TimeOfDay selectedTime = TimeOfDay.now();
+  void _showAddDialog() {
+    final tCon = TextEditingController();
+    final dCon = TextEditingController();
+    DateTime selDate = DateTime.now();
+    TimeOfDay selTime = TimeOfDay.now();
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(ctx).viewInsets.bottom,
-          left: 20, right: 20, top: 20,
-        ),
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom + 20, left: 20, right: 20, top: 20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Новое напоминание', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            TextField(controller: titleController, decoration: const InputDecoration(labelText: 'Название напоминания')),
-            TextField(controller: descController, decoration: const InputDecoration(labelText: 'Описание')),
+            const Text("Новое напоминание", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 15),
+            TextField(controller: tCon, decoration: const InputDecoration(labelText: 'Название', border: OutlineInputBorder())),
+            const SizedBox(height: 10),
+            TextField(controller: dCon, decoration: const InputDecoration(labelText: 'Описание', border: OutlineInputBorder())),
+            const SizedBox(height: 10),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.calendar_today),
-                  label: const Text('Дата'),
-                  onPressed: () async {
-                    final d = await showDatePicker(
-                      context: context,
-                      initialDate: DateTime.now(),
-                      firstDate: DateTime.now(),
-                      lastDate: DateTime(2100),
-                    );
-                    if (d != null) selectedDate = d;
-                  },
-                ),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.access_time),
-                  label: const Text('Время'),
-                  onPressed: () async {
-                    final t = await showTimePicker(
-                      context: context,
-                      initialTime: TimeOfDay.now(),
-                    );
-                    if (t != null) selectedTime = t;
-                  },
-                ),
+                TextButton.icon(icon: const Icon(Icons.calendar_month), label: const Text("Дата"), onPressed: () async {
+                  final d = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime.now(), lastDate: DateTime(2100));
+                  if (d != null) selDate = d;
+                }),
+                TextButton.icon(icon: const Icon(Icons.access_time), label: const Text("Время"), onPressed: () async {
+                  final t = await showTimePicker(context: context, initialTime: TimeOfDay.now());
+                  if (t != null) selTime = t;
+                }),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 10),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 45),
-                backgroundColor: Colors.blueAccent,
-                foregroundColor: Colors.white,
-              ),
+              style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50), backgroundColor: Colors.deepPurple, foregroundColor: Colors.white),
               onPressed: () {
-                final finalDateTime = DateTime(
-                  selectedDate.year, selectedDate.month, selectedDate.day,
-                  selectedTime.hour, selectedTime.minute,
-                );
-                
-                if (titleController.text.isEmpty) return;
-                
-                if (finalDateTime.isAfter(DateTime.now())) {
-                  _addReminder(titleController.text, descController.text, finalDateTime);
+                if (tCon.text.isNotEmpty) {
+                  final dt = DateTime(selDate.year, selDate.month, selDate.day, selTime.hour, selTime.minute);
+                  if (dt.isBefore(DateTime.now())) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Выберите время в будущем!")));
+                    return;
+                  }
+                  final id = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+                  setState(() {
+                    _list.add(Reminder(id: id, title: tCon.text, desc: dCon.text, time: dt));
+                    _list.sort((a, b) => a.time.compareTo(b.time)); // Сортировка
+                  });
+                  _saveData();
+                  widget.service.schedule(id, tCon.text, dCon.text, dt);
                   Navigator.pop(context);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Выберите время в будущем!')),
-                  );
                 }
-              },
-              child: const Text('СОХРАНИТЬ'),
+              }, 
+              child: const Text("СОЗДАТЬ")
             ),
-            const SizedBox(height: 20),
           ],
         ),
       ),
